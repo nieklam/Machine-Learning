@@ -1,0 +1,154 @@
+---
+title: "Barbells lifted the right way, a ML analysis"
+author: "Niek Lam"
+date: "November 6-th, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Synopsis
+A classification tree model and a random forest model are developed to predict the Unilateral Dumbbell Biceps Curl in five different fashions. The random forest model predicts any observation right for the training data and the validation data as well. The model is used to predict 20 test cases. 
+
+#Research question and used data 
+**setting.** Six participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.  
+
+**Research question.** Create a model to predict the right class (A, ..., E) by use of several variables holding information about the movements made. The model will also be used to predict 20 different test cases. 
+
+**Data source.** The data has been kindly made available by: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.   
+The data can be found at: <http://groupware.les.inf.puc-rio.br/har>, for more details see [here]( http://groupware.les.inf.puc-rio.br/har#ixzz4NLOt4n4c). There are 2 data sets available. First the [training data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) to be applied to model estimation and selection, and second the [test cases data]() holding 20 different test cases.
+
+```{r, echo=FALSE, include=FALSE}
+# required libs
+library( ggplot2 )
+library(dplyr)
+library( caret )
+library( rattle )
+
+# reading the data 
+testcases  <- read.csv("pml-testing.csv", stringsAsFactors=F ,na.strings=c("NA","#DIV/0!",""))
+sourceData <- read.csv("pml-training.csv", stringsAsFactors=F ,na.strings=c("NA","#DIV/0!",""))
+
+```
+
+
+
+#Data preparation
+The training data holds 19.622 observations, the test case data 20 observations. Both data sets hold the same 160 variables including the variable, called Classe, that is to be predicted. In the process of data preparation 107 variables are dropped for two reasons.  
+
+**Deleting the variables for administrative purposes.** These 7 varables hold information about the point of time the participants performed their excercises. 
+
+
+```{r, echo=FALSE}
+
+sourceData$cvtd_timestamp <- as.factor(sourceData$cvtd_timestamp)
+sourceData$cvtd_timestamp <- as.numeric(sourceData$cvtd_timestamp)
+       
+p <- ggplot(sourceData, aes(cvtd_timestamp, classe) ) +
+        geom_point( aes(color = user_name) ) +
+        labs(title="Time of training by the 6 participants", x ="Moment of training", y="Excercise")
+p
+
+```
+
+
+This information about of the point of time of excercise combined with the use name is sufficient to predict accurately the preformed activity. This leads to an extreme high out of sample error: there is no garantee the experiment will be done at the same hours. Therefore, these variables for administrative purpose, holding information about measuring moment and participants, are removed from the model estimates.  
+
+**Deleting the variables holding missing values.** There are 100 variables removed since the have missing values. The rate of missing values of each of these 100 variables was at least 80%. These numbers would lead to estimation problems, so they were removed. 
+  
+**Cross validation.** From the training data 25% were put aside into a validation set to use for cross validation. This test set will be used to evaluate the expected out of sample error. 
+
+After the process of data preparation there 3 data sets: the training set (N=14.718) used to estimate the models, the validation set (N=4.904) used to  evaluate the expected out of sample error, and the test case data (N=20) to test the models. Each of the data sets has 53 variables.
+
+```{r, echo=FALSE, include=FALSE}
+
+# remove the first 7 variables ...
+testcases  <- testcases[, -c(1:7)]
+sourceData <- sourceData[, -c(1:7)]        
+
+# ... and the variables holding missing values
+testcases <- testcases[, colSums(is.na(testcases)) == 0]
+sourceData <- sourceData[, colSums(is.na(sourceData)) == 0]
+
+# Data splittingby create a training and validation data set
+inTrain = createDataPartition(sourceData$classe, p = 3/4)[[1]]
+training   = sourceData[ inTrain,]
+validation = sourceData[-inTrain,]
+
+```
+
+#Model selection and estimation
+There are 2 models estimated: a classification tree model and forest random model. The results of classification tree model are easy to interpret and it's estimation doesn't need much computing time. In contrast, the random model forest gives a model that is hard to interpret and needs a lot of more time estimate, but the predictions are much better. 
+
+##The classification tree model
+The result of the classification tree model is displayed here. 
+```{r, echo=FALSE, include=FALSE}
+
+# FIRST model: classification tree (required 5 sec)
+set.seed( 33833 )
+control <- trainControl(method = "cv", number = 5)
+fit_rpart <- train(classe ~ ., data = training, method = "rpart", 
+                   trControl = control)
+varImp_rpart<- varImp(fit_rpart, scale = TRUE)
+p_rpart <- predict(fit_rpart, validation)
+```
+
+```{r, echo=FALSE}
+fancyRpartPlot(fit_rpart$finalModel)
+```
+
+The tree is easy to interpret. For instance, class E (throwing the hips to the front) will be selected when the predictor roll_belt has a high measurement, and there are only 5 variables relevant (roll belt, yaw belt, magnet dumbbell, pitch forehand, and pitch belt).  
+To evaluate the predictive power of the model 2 confusion matrices are calculated and shown below: the first one is about training data, the second about the validation data set.
+
+```{r, echo=FALSE}
+p_rpartt <- predict(fit_rpart, training)
+p_rpartv <- predict(fit_rpart, validation)
+
+```
+
+
+```{r, echo=TRUE}
+# the predictions for the training data
+confusionMatrix(training$classe, p_rpartt)$table
+
+# the predictions for the validation data set
+confusionMatrix(validation$classe, p_rpartv)$table
+```
+
+The correct predicted observations are found on the diagonal. For the table based on the training data, the number is (3.813 + 983 + 1.302 + 0 + 1.220)/14.718 = 7.318/14.718 = 49.7%. The corresponding numbers of the second table are (1.264 + 322 + 431 + 0 + 402) / 4.904 = 2.419/4.904 = 49.3%.  
+Since both percentages equal, so the model is unbiased and the expected out of sample is low (the model works fine at new data set).
+
+##The random forest model
+The random forest model has more predictive power, and the expected out of sample is low as shown in the 2 confusion matrices show below (the first one is about training data, the second about the validation data set).
+
+```{r, echo=FALSE, cache=TRUE, include=FALSE}
+#SECOND model: random forests (required 5 min)
+set.seed( 33833 )
+fit_rf <- train(classe ~ ., data = training, method = "rf", ntree = 200,
+                trControl = control)
+
+p_rf_t <- predict(fit_rf, training)
+p_rf_v <- predict(fit_rf, validation)
+```
+
+```{r, echo=TRUE}
+confusionMatrix(training$classe, p_rf_t)$table
+confusionMatrix(validation$classe, p_rf_v)$table
+```
+
+For both tables, all predicted observations are found on the diagonal. So, it has a better predictive power than the classification tree model, and the expected out of sample is low (this model will work perfect at new data set). 
+
+##The random forest model applied on the test cases
+By use of the random forest model a new variable, called predicted_classe, can be constructed in the data set Test Cases.
+```{r, echo=FALSE, include=FALSE}
+predictions_test_cases <-predict(fit_rf, testcases)
+testcases$predicted_classe <- predictions_test_cases
+
+```
+
+```{r}
+testcases$predicted_classe
+```
+
